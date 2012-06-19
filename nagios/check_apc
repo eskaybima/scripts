@@ -1,0 +1,27 @@
+#!/bin/sh
+
+# Nagios check for APC Smart-UPS installs
+#
+# Arno Broekhof | 2009
+
+
+
+PID_FILE=/etc/pbeagent.pid
+APC_DIR=/opt/APC/PowerChuteBusinessEdition/Agent
+
+if [ ! -d $APC_DIR ]
+then
+  echo "WARNING:  APC UPS - Software not installed"
+  exit 1 
+fi
+
+ps `cat $PID_FILE 2>/dev/null | awk "{ print "'$1'" }"` | grep Dpicard.main.thread > /dev/null
+if [ $? = 0 -a -e $PID_FILE ]
+then
+  echo "OK:  APC UPS - Deamon Running"
+  exit 0
+else
+  echo "CRITICAL:  APC UPS - Deamon not Running"
+  exit 2
+fi
+

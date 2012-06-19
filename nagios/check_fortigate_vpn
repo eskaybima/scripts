@@ -1,0 +1,169 @@
+#!/usr/bin/perl
+# This  Plugin checks the VPN states of Fortigate Firewalls
+#
+#
+# Checks the active IPSEC VPN connections 
+
+
+use strict;
+use Net::SNMP;
+
+if ($#ARGV == -1)
+{
+  print_help();
+}
+
+my %status       = (  'UNKNOWN'  => '-1',
+                      'OK'       => '0',
+                      'WARNING'  => '1',
+                      'CRITICAL' => '2' );
+
+my %entitystate  = (  '1' => 'down',
+                      '2' => 'up' );
+
+sub pars_args
+{
+  my $ip        = "";
+  my $community = ""; 
+  while($ARGV[0] =~/^-/) 
+  {
+    if($ARGV[0] =~/^-H|^--host/) 
+    {
+      $ip = $ARGV[1];
+      shift @ARGV;
+      shift @ARGV;
+      next;
+    }
+    if($ARGV[0] =~/^-C|^--Community/) 
+    {
+      $community = $ARGV[1];
+      shift @ARGV;
+      shift @ARGV;
+      next;
+    }
+  }
+  return ($ip, $community);
+}
+sub print_help()
+{
+  print "Usage: check_fortigate_vpn -H host -C community\n";
+  print "Options:\n";
+  print " -H --host STRING or IPADDRESS\n";
+  print "   Check interface on the indicated host.\n";
+  print " -C --community STRING\n";
+  print "   Community-String for SNMP-Walk.\n\n";
+  print "This plugin checks all configured IPSEC tunnels, en gives\nthe number of current IPSEC tunnels and SSL-VPN tunnels.\n\n";
+  
+  exit($status{"UNKNOWN"});
+}
+sub get_snmp_session
+{
+  my $ip        = $_[0];
+  my $community = $_[1];
+  my ($session, $error) = Net::SNMP->session(
+             -hostname  => $ip,
+             -community => $community,
+             -port      => 161,
+             -timeout   => 1,
+             -retries   => 3,
+             -translate => [-timeticks => 0x0] #schaltet Umwandlung von Timeticks in Zeitformat aus
+              );
+  return ($session, $error);
+}
+sub close_snmp_session
+{
+  my $session = $_[0];
+  
+  $session->close();
+}
+sub get_snmp_request
+{
+  my $session = $_[0];
+  my $oid     = $_[1];
+  return $session->get_request($oid);
+}
+sub get_snmp_table
+{
+  my $session = $_[0];
+  my $oid     = $_[1];
+  return $session->get_table($oid);
+}
+
+my ($ip, $community) = pars_args();
+my ($session, $error)       = get_snmp_session($ip, $community);
+
+#Requests
+my $oid_unitdesc    = ".1.3.6.1.2.1.1.1.0"; 
+my $oid_ActiveSSL   = ".1.3.6.1.4.1.12356.9.5.1.7.1"; 
+#Tables
+my $oid_ipsecphase2name     = ".1.3.6.1.4.1.12356.9.4.1.3";
+my $oid_ipsecstate  = ".1.3.6.1.4.1.12356.9.4.1.20";
+
+my %result    = %{get_snmp_request($session, $oid_unitdesc)};
+my $unitdesc  = $result{$oid_unitdesc};
+   %result    = %{get_snmp_request($session, $oid_ActiveSSL)};
+my $ActiveSSL = $result{$oid_ActiveSSL};
+
+my %result1    = %{get_snmp_table($session, $oid_ipsecphase2name)};
+my %result2   = %{get_snmp_table($session, $oid_ipsecstate)};
+
+my $counter = 0;
+my @ipsecphase2name;
+my @ipsecstate;
+
+  foreach my $oid(sort keys %result1)
+  {
+    $ipsecphase2name[$counter] = $result1{$oid};
+    $counter++;
+  }
+    $counter = 0;
+  foreach my $oid(sort keys %result2)
+  {
+    $ipsecstate[$counter] = $result2{$oid};
+    $counter++;
+  }
+  close_snmp_session($session);  
+
+my $string_errors="";
+my $failed_ipsec=0;
+
+#IPSEC Tunnels checken
+  for(my $i =0; $i<$counter; $i++)
+  {
+	if ($ipsecstate[$i] == 1)
+	{
+	$failed_ipsec++;
+    $string_errors .= ", ";
+	$string_errors .= $ipsecphase2name[$i]." ".$entitystate{$ipsecstate[$i]};
+	}
+  }
+#Set Unitstate
+my $unitstate="OK";
+    if ($failed_ipsec == 1)
+	{
+	$unitstate="WARNING";  
+	}
+	if ($failed_ipsec >= 2)
+	{
+	$unitstate="CRITICAL";  
+	}
+# Set output String	
+my $active_ipsec = $counter - $failed_ipsec;
+my $string = $unitdesc.": ".$unitstate.", Active SSL-VPN Tunnels: ".$ActiveSSL.", Active IPSEC Tunnels: ".$active_ipsec." ".$string_errors;
+
+  
+  my $state = "OK";
+  if($string =~/UNKNOWN/)
+  {
+    $state = "UNKNOWN";
+  }
+  if($string =~/WARNING/)
+  {
+    $state = "WARNING";
+  }
+  if($string =~/CRITICAL/)
+  {
+    $state = "CRITICAL";
+  }
+print $string."\n";
+exit($status{$state});

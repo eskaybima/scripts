@@ -1,0 +1,130 @@
+#!/bin/sh +x
+
+
+# level 0 full backup
+# level 1 monthly backup
+# level 2 weekly backup
+# level 3 daily backup
+
+# change the variable $MAINDEST  and $SOURCEDISK to suit your needs
+
+# Script by Arno Broekhof 2009 
+
+
+
+# time variable
+MONTH=`date +%m` 		# returns the current month
+YEAR=`date +%Y`			# returns the current year
+DAY=`date +%d`			# returns the current day
+WEEKLY=`date +%w`		# returns the current week
+CURRENT_DATE=`date +%d-%m-%Y`	# returns the current date
+
+# command variable
+RM=`which rm`
+CP=`which cp`
+ECHO=`which echo`
+TOUCH=`which touch`
+ID=`which id`
+
+
+####### Custom direcotory settings
+$MAINDEST=/tmp
+$SOURCEDISK=/dev/disk2s1
+
+# log settings
+LOG_DIR=/var/log/backup
+LOG_FILE=${LOG_DIR}/backup.${CURRENT_DATE}.log
+MAILADRES=test@example.com
+HOSTNAME=`hostname`
+
+# file settings
+$DEST_MONTH=${MAINDEST}/${MONTH}
+$DEST_WEEKLY=${DEST_MONTH}/${WEEKLY}
+$DEST_DAY=${DEST_WEEKLY}/${DAY}
+
+
+# dump files
+$DUMP_WEEK=${DEST_WEEKLY}/dmp.${WEEKLY}
+$DUMP_DAY=${DEST_DAY}/dmp.${DAY}
+$DUMP_MONTH=${DEST_MONTH}/dmp.${MONTH}
+$DUMP_FULL=dmp.full
+
+#################################################
+
+
+# check if the user running the script had root privileges
+if [ `$ID -u` -ne 0 ]
+then
+  $ECHO "you must be root to perform this action!"
+  exit 1
+fi
+
+
+# check if the log directory exist
+if [ ! -d $LOG_DIR ]
+then
+  mkdir -p $LOG_DIR
+fi
+
+
+# check if the full backup already has been made
+if [ ! -e ${MAINDEST}/${DUMP_FULL} ]
+then
+  dump -u0f ${MAINDEST}/${DUMP_FULL} $SOURCEDISK >> $LOG_FILE 
+
+  if [ $? -ne 0 ]
+  then
+    $ECHO "something went wrong! aborted...."
+    mail -s "Backup Error $HOSTNAME" $MAILADRES < $LOG_FILE
+    exit 1
+  fi
+fi
+
+
+# check if the month backup already has run this month
+if [ ! -d $DEST_MONTH ]
+then
+  mkdir -p $DEST_MONTH
+  if [ ! -f $DUMP_MONTH ]
+  then
+    dump -u1 -f $DUMP_MONTH $SOURCEDISK >> $LOG_FILE
+  fi
+  if [ $? -ne 0 ]
+  then
+    mail -s "Backup Error $HOSTNAME" $MAILADRES < $LOG_FILE > /dev/null
+    exit 1
+  fi
+fi
+
+# check if the week backup already has run
+if [ ! -d $DEST_WEEKLY ]
+then
+  mkdir -p $DEST_WEEKLY
+  if [ ! -f $DUMP_WEEKLY ]
+  then
+    dump -u2 -f $DUMP_WEEK $SOURCEDISK >> $LOG_FILE
+  fi
+  if [ $? - ne 0 ]
+  then
+    mail -s "Backup Error $HOSTNAME" $MAILADRES < $LOG_FILE > /dev/null
+    exit 1
+  fi
+fi
+
+# check if the daily backup already has run
+if [ ! -d $DEST_DAY ]
+then
+  mkdir -p $DEST_DAY
+  if [ ! -f $DUMP_DAY ]
+  then
+    dump -u3 -f $DUMP_DAY $SOURCEDESK >> $LOG_FILE
+  fi
+  if [ $? - ne 0 ]
+  then
+    mail -s "Backup Error $HOSTNAME" $MAILADRES < $LOG_FILE > /dev/null
+    exit 1
+  fi
+fi
+
+exit 0
+ 

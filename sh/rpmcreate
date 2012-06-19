@@ -1,0 +1,25 @@
+#!/bin/sh
+
+RPMBUILD=/usr/bin/rpmbuild
+RPMMACROS=~/.rpmmacros
+
+if [ ! -f $RPMBUILD ]
+then
+  echo 'RPM Build commando not found'
+  echo 'please install rpm-build rpm package.'
+  exit 1
+fi
+
+if [ ! -f $RPMMACROS ]
+then
+  echo 'RPM BUILD macros are not defined'
+  echo "please create the file $RPMMACROS that contains:"
+  echo "%packager Arno Broekhof"
+  echo "%_topdir /root/rpm"
+  echo "%_tmppath /root/rpm/tmp"
+  exit 1
+fi
+
+echo 'rpmbuild found'
+
+exit 0

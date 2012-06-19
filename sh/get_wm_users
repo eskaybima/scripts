@@ -1,0 +1,60 @@
+#!/bin/sh
+# script om externe users voor webmin uit ADS (ldap) te halen
+# users krijgen rechten obv hun groep in AD gecombineerd met
+# de corresponderende groep in webmin (helpdesk[12], sysadmin)
+
+ldap_host=ad.example.local
+
+usr_pipe=/var/tmp/users
+grp_file=/etc/webmin/webmin.groups
+bind_dn="cn=Linux,ou=service accounts,dc=example,dc=nl"
+base="dc=example,dc=nl"
+export acl_file=/etc/webmin/webmin.acl
+export usr_file=/etc/webmin/miniserv.users
+
+# ldap search strings
+hd1_search='(&(memberOf=CN=H1,OU=Beveiligingsgroepen,OU=Groepen,dc=example,dc=nl)(!(memberOf=CN=H2,OU=Beveiligingsgroepen,OU=Groepen,dc=example,dc=nl))(!(memberOf=CN=Ontwikkeling,OU=Beveiligingsgroepen,OU=Groepen,dc=example,dc=nl))(!(memberOf=CN=Buitendienst,OU=Beveiligingsgroepen,OU=Groepen,dc=example,dc=nl)))'
+hd2_search='(&(memberOf=CN=H2,OU=Beveiligingsgroepen,OU=Groepen,dc=example,dc=nl)(!(memberOf=CN=Ontwikkeling,OU=Beveiligingsgroepen,OU=Groepen,dc=example,dc=nl)))'
+bud_search='(&(memberOf=CN=Buitendienst,OU=Beveiligingsgroepen,OU=Groepen,dc=example,dc=nl)(!(memberOf=CN=Ontwikkeling,OU=Beveiligingsgroepen,OU=Groepen,dc=example,dc=nl))(!(memberOf=CN=H2,OU=Beveiligingsgroepen,OU=Groepen,dc=example,dc=nl)))'
+sys_search='(memberOf=CN=Ontwikkeling,OU=Beveiligingsgroepen,OU=Groepen,dc=example,dc=nl)'
+
+# groep specifieke modules
+export hd1_mods=`awk -F: '/^helpdesk1/ {print ": " $3}' $grp_file`
+export hd2_mods=`awk -F: '/^helpdesk2/ {print ": " $3}' $grp_file`
+export bud_mods=`awk -F: '/^buitendienst/ {print ": " $3}' $grp_file`
+export sys_mods=`awk -F: '/^sysadmin/ {print ": " $3}' $grp_file`
+
+# voeg externe authenticatie toe en update ldap_host
+authstring="extauth=/usr/lib/squid/squid_ldap_auth -v 3 -R -b $base -D \"$bind_dn\" -h $ldap_host -w station -f \"sAMAccountName=%s\""
+sed -i.bak "/^extauth=/d" /etc/webmin/miniserv.conf
+echo $authstring >>/etc/webmin/miniserv.conf
+
+[ ! -f /etc/webmin/webmin.acl.root ]       && head -2 /etc/webmin/webmin.acl >/etc/webmin/webmin.acl.root
+[ ! -f /etc/webmin/miniserv.users.root ]   && head -2 /etc/webmin/miniserv.users >/etc/webmin/miniserv.users.root
+
+rm -f $usr_pipe
+mkfifo $usr_pipe
+awk '/^sAMAccountName/ {print $2 ENVIRON["hd1_mods"] >"/etc/webmin/webmin.acl.HD1"; print $2 ":e:0::::::::" >"/etc/webmin/miniserv.users.HD1"}' <${usr_pipe} &
+ldapsearch -x -l 20 -b "$base" -D "$bind_dn" -h $ldap_host -w station "$hd1_search" samAccountName >${usr_pipe}
+if [ $? -eq 0 ]; then wait; else exit; fi
+
+awk '/^sAMAccountName/ {print $2 ENVIRON["hd2_mods"] >"/etc/webmin/webmin.acl.HD2"; print $2 ":e:0::::::::" >"/etc/webmin/miniserv.users.HD2"}' <${usr_pipe} &
+ldapsearch -x -l 20 -b "$base" -D "$bind_dn" -h $ldap_host -w station "$hd2_search" samAccountName >${usr_pipe}
+if [ $? -eq 0 ]; then wait; else exit; fi
+
+awk '/^sAMAccountName/ {print $2 ENVIRON["bud_mods"] >"/etc/webmin/webmin.acl.BUD"; print $2 ":e:0::::::::" >"/etc/webmin/miniserv.users.BUD"}' <${usr_pipe} &
+ldapsearch -x -l 20 -b "$base" -D "$bind_dn" -h $ldap_host -w station "$bud_search" samAccountName >${usr_pipe}
+if [ $? -eq 0 ]; then wait; else exit; fi
+
+awk '/^sAMAccountName/ {print $2 ENVIRON["sys_mods"] >"/etc/webmin/webmin.acl.TO"; print $2 ":e:0::::::::" >"/etc/webmin/miniserv.users.TO"}' <${usr_pipe} &
+ldapsearch -x -l 20 -b "$base" -D "$bind_dn" -h $ldap_host -w station "$sys_search" samAccountName >${usr_pipe}
+if [ $? -eq 0 ]; then wait; else exit; fi
+rm -f $usr_pipe
+
+cat /etc/webmin/webmin.acl.root /etc/webmin/webmin.acl.HD1 /etc/webmin/webmin.acl.HD2 /etc/webmin/webmin.acl.BUD /etc/webmin/webmin.acl.TO>/etc/webmin/webmin.acl
+cat /etc/webmin/miniserv.users.root /etc/webmin/miniserv.users.HD1 /etc/webmin/miniserv.users.HD2 /etc/webmin/miniserv.users.BUD /etc/webmin/miniserv.users.TO>/etc/webmin/miniserv.users
+for user in `sed 's/:.*//' /etc/webmin/miniserv.users.HD1`; do cp -f /etc/webmin/custom/helpdesk1.gacl /etc/webmin/custom/$user.acl; done
+for user in `sed 's/:.*//' /etc/webmin/miniserv.users.HD2`; do cp -f /etc/webmin/custom/helpdesk2.gacl /etc/webmin/custom/$user.acl; done
+for user in `sed 's/:.*//' /etc/webmin/miniserv.users.BUD`; do cp -f /etc/webmin/custom/buitendienst.gacl /etc/webmin/custom/$user.acl; done
+
+/etc/init.d/webmin restart >/dev/null 2>&1

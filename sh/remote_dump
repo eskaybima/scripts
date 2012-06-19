@@ -1,0 +1,160 @@
+#!/bin/sh
+
+# remote dump script over ssh
+
+# level 0 year backup
+# level 1 monthly backup
+# level 2 weekly backup
+# level 3 daily backup
+
+
+# time variable
+MONTH=`date +%m` 		# returns the current month
+YEAR=`date +%Y`			# returns the current year
+DAY=`date +%d`			# returns the current day
+WEEKLY=`date +%w`		# returns the current week
+CURRENT_DATE=`date +%d-%m-%Y`	# returns the current date
+
+# command variable
+RM=`which rm`
+CP=`which cp`
+ECHO=`which echo`
+TOUCH=`which touch`
+ID=`which id`
+
+# Server settings
+BACKUP_SERVER_IP=
+REMOTE_SERVER_IP=
+
+
+# log settings
+LOG_DIR=/var/log/backup
+LOG_FILE=${LOG_DIR}/backup.${CURRENT_DATE}.log
+MAILADRES=test@example.com
+HOSTNAME=`hostname`
+
+# file settings
+$DEST_DIR=/data
+$DEST_MONTH=${DEST_DIR}/${MONTH}
+$DEST_WEEKLY=${DEST_MONTH}/${WEEKLY}
+$DEST_DAY=${DEST_WEEKLY}/${DAY}
+
+# Source settings
+SOURCE_DISK=/dev/sda1
+
+# dump files
+$DUMP_WEEK=${DEST_WEEKLY}/dmp.${WEEKLY}
+$DUMP_DAY=${DEST_DAY}/dmp.${DAY}
+$DUMP_MONTH=${DEST_MONTH}/dmp.${MONTH}
+$DUMP_FULL=dmp.full
+
+##########################################################
+# check if the user running the script had root privileges
+if [ `$ID -u` -ne 0 ]
+then
+  $ECHO "you must be root to perform this action!"
+  exit 1
+fi
+
+# check if the remote server variable is filled
+if [ -z ${REMOTE_SERVER_IP} ]
+then
+	$ECHO "No remote server given.... aborting
+	exit 1
+fi
+
+# check if the backup server ip is given
+if [ -z ${BACKUP_SERVER_IP} ]
+then
+	$ECHO "No backup server given... aborting
+fi
+
+#check if the destination directory exist
+if [ ! -d ${DEST_DIR} ]
+then
+	mkdir -p ${DEST_DIR}
+	if [ $? -ne 0 ]
+	then
+		$ECHO "Unable to create backup directory"
+		exit 1
+	fi
+fi
+
+# check if the log directory exist
+if [ ! -d $LOG_DIR ]
+then
+  	mkdir -p $LOG_DIR
+if [ $? -ne 0 ]
+	then
+		$ECHO "Unable to create log directory"
+		exit 1
+	fi
+fi
+
+# check if the full backup already has been made
+if [ ! -e ${DEST_DIR}/${DUMP_FULL} ]
+then
+	(
+    ssh ${REMOTE_SERVER_IP} "dump -0uf - ${SOURCE_DISK} | ssh ${BACKUP_SERVER_IP} dd of=${DEST_DIR}/${DUMP_FULL}" 
+	if [ $? -ne 0 ]
+    then
+    	$ECHO "something went wrong! aborted...."
+    	mail -s "Backup Error $HOSTNAME" $MAILADRES < $LOG_FILE
+    	exit 1
+    
+	fi 
+	) >> ${LOG_FILE} 2>&1
+fi
+
+# check if the month backup already has run this month
+if [ ! -d $DEST_MONTH ]
+then
+	mkdir -p $DEST_MONTH
+  	if [ ! -f $DUMP_MONTH ]
+  	then
+  		(
+    	ssh ${REMOTE_SERVER_IP} "dump -1uf - ${SOURCE_DISK} | ssh ${BACKUP_SERVER_IP} dd of=${DEST_DIR}/${DUMP_MONTH}" 
+		if [ $? -ne 0 ]
+    	then
+    		$ECHO "something went wrong! aborted...."
+    		mail -s "Backup Error $HOSTNAME" $MAILADRES < $LOG_FILE
+    		exit 1
+    	fi
+    fi 
+	) >> ${LOG_FILE} 2>&1
+fi
+
+# check if the week backup already has run
+if [ ! -d $DEST_WEEKLY ]
+then
+  mkdir -p $DEST_WEEKLY
+  if [ ! -f $DUMP_WEEKLY ]
+	(
+    ssh ${REMOTE_SERVER_IP} "dump -2uf - ${SOURCE_DISK} | ssh ${BACKUP_SERVER_IP} dd of=${DEST_DIR}/${DUMP_WEEKLY}" 
+	if [ $? -ne 0 ]
+    then
+    	$ECHO "something went wrong! aborted...."
+    	mail -s "Backup Error $HOSTNAME" $MAILADRES < $LOG_FILE
+    	exit 1
+    fi 
+	) >> ${LOG_FILE} 2>&1
+fi
+
+# check if the daily backup already has run
+if [ ! -d $DEST_DAY ]
+then
+  	mkdir -p $DEST_DAY
+  	if [ ! -f $DUMP_DAY ]
+  	then
+  	(
+    ssh ${REMOTE_SERVER_IP} "dump -3uf - ${SOURCE_DISK} | ssh ${BACKUP_SERVER_IP} dd of=${DEST_DIR}/${DUMP_DAY}" 
+	if [ $? -ne 0 ]
+    then
+    	$ECHO "something went wrong! aborted...."
+    	mail -s "Backup Error $HOSTNAME" $MAILADRES < $LOG_FILE
+    	exit 1
+    fi 
+	) >> ${LOG_FILE} 2>&1
+fi
+
+exit 0

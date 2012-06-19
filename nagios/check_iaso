@@ -1,0 +1,12 @@
+#!/bin/sh
+
+IASO_HOME=/usr/local/backupmanager
+IASO_PID=$IASO_HOME/var/run/BackupFP.pid
+
+PROC=`ps aux | grep [B]ackupFP | wc -l`
+
+if [ $PROC -eq 0 ]
+then
+    $IASO_HOME/sbin/BackupFP.sh restart </dev/null >/dev/null 2>/dev/null &
+fi
+
